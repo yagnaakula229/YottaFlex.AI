@@ -2,9 +2,10 @@ from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import create_engine, inspect, select, update
+from sqlalchemy import create_engine, inspect, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.engine import make_url
 
 from app.core.config import get_settings
 from app.db.base import Base
@@ -33,10 +34,17 @@ def db_session():
     if not settings.test_database_url:
         pytest.skip("Set TEST_DATABASE_URL to run PostgreSQL integration tests")
 
+    if not (make_url(settings.test_database_url).database or "").endswith("_test"):
+        pytest.fail("TEST_DATABASE_URL must target a dedicated database ending in _test")
     engine = create_engine(settings.test_database_url, pool_pre_ping=True)
     if not inspect(engine).has_table("customer"):
         engine.dispose()
         pytest.fail("Run `python -m alembic upgrade head` against TEST_DATABASE_URL first")
+
+    tables = [*Base.metadata.tables.values(), *EvaluationBase.metadata.tables.values()]
+    qualified_tables = ", ".join(f'"{table.schema or "public"}"."{table.name}"' for table in tables)
+    with engine.begin() as connection:
+        connection.execute(text(f"TRUNCATE TABLE {qualified_tables} CASCADE"))
 
     with engine.connect() as connection:
         transaction = connection.begin()
@@ -209,10 +217,14 @@ def test_schedule_idempotency_key_is_unique(db_session: Session) -> None:
     first = SendSchedule(
         business_id="SEND-2026-000001",
         idempotency_key="schedule-key-1",
+        request_fingerprint="a" * 64,
         customer_id="CUS-000001",
         cart_id=cart.business_id,
         campaign_id=campaign.business_id,
+        recovery_decision_id=None,
         channel="email",
+        policy_version="test-v1",
+        policy_configuration_hash="b" * 64,
         status="scheduled",
         scheduled_for=FIXED_TIME,
         created_at=FIXED_TIME,
@@ -226,10 +238,14 @@ def test_schedule_idempotency_key_is_unique(db_session: Session) -> None:
                 SendSchedule(
                     business_id="SEND-2026-000002",
                     idempotency_key="schedule-key-1",
+                    request_fingerprint="a" * 64,
                     customer_id="CUS-000001",
                     cart_id=cart.business_id,
                     campaign_id=campaign.business_id,
+                    recovery_decision_id=None,
                     channel="email",
+                    policy_version="test-v1",
+                    policy_configuration_hash="b" * 64,
                     status="scheduled",
                     scheduled_for=FIXED_TIME,
                     created_at=FIXED_TIME,

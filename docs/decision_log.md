@@ -57,3 +57,11 @@ These choices do not prevent the structural migration below: unresolved behavior
 - Normal profile generation produces clean operational records only. The four evaluation labels are present with `expected=false`; no deliberate anomaly facts are injected into operational tables. Constructing positive anomaly fixtures remains separate work because some cases intentionally contradict operational policy and need explicit fixture authorization.
 - No attribution decisions, candidates, or canonical credits are generated until attribution touch eligibility, window anchoring, and tie-breaking are approved. Generated orders remain unattributed.
 - Scale profile `abandoned_carts=20,000` means carts whose generated `Cart.status` is `abandoned`, whose `updated_at` is at least the configured inactivity interval before `reference_time`, and which have no linked order. Consent/frequency eligibility is applied after that cart state; actual schedules/attempts may be lower.
+
+## Phase 4 provisional recovery policy
+
+The first recovery-decision implementation uses the configurable defaults in `business_rules.md`: inclusive 60-minute inactivity; qualifying cart activity event types; accepted send attempts in `(lower, upper]` rolling windows; fail-closed effective channel consent; and deterministic campaign-ID/template-priority/template-ID selection. Every decision records policy version and a hash of the complete policy configuration. These defaults are not approved business rules and can be changed by settings plus a new version; decision history is retained.
+
+`RecoveryDecision` is an operational append-only history record. `SendSchedule` records the authorizing decision, policy version, and policy hash. Equivalent idempotency-key reuse replays the stored schedule; incompatible reuse returns a conflict. Evaluation-label data remains under the separate `evaluation` schema and is not imported by `app.services`.
+
+`Consent.last_event_id` references the latest event by `(occurred_at, business_id)`. Current-state upserts use the same ordering predicate, preventing late or concurrent older events from regressing the projection while preserving each immutable `ConsentEvent`.

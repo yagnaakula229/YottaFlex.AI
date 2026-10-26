@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import timedelta
+from datetime import UTC, timedelta
 
 from sqlalchemy import and_, func, outerjoin, select
 from sqlalchemy.orm import Session
@@ -88,13 +88,26 @@ def generate_sends(
             failed_attempt = random_source.randrange(10_000) < 200
             campaign_business_id = campaign_id(((emitted - 1) % 3) + 1)
             scheduled_for = config.reference_time - timedelta(minutes=30) + timedelta(seconds=emitted % 1_200)
+            request_material = "|".join(
+                (
+                    cart_business_id,
+                    customer_business_id,
+                    campaign_business_id,
+                    config.send_channel,
+                    config.reference_time.astimezone(UTC).isoformat(),
+                    config.configuration_hash,
+                )
+            )
             yield {
                 "business_id": schedule_id(emitted),
                 "idempotency_key": schedule_idempotency_key(cart_business_id, campaign_business_id, config),
+                "request_fingerprint": hashlib.sha256(request_material.encode("utf-8")).hexdigest(),
                 "customer_id": customer_business_id,
                 "cart_id": cart_business_id,
                 "campaign_id": campaign_business_id,
                 "channel": config.send_channel,
+                "policy_version": "synthetic-generator-v1",
+                "policy_configuration_hash": config.configuration_hash,
                 "status": "failed" if failed_attempt else "sent",
                 "scheduled_for": scheduled_for,
                 "created_at": scheduled_for - timedelta(minutes=5),

@@ -4,7 +4,7 @@ An end-to-end platform to identify abandoned shopping carts, enforce customer co
 
 ## Phase 1: Infrastructure
 
-The API is a synchronous FastAPI application using SQLAlchemy 2.0 sessions with the psycopg 3 PostgreSQL driver. Synchronous database access keeps transaction boundaries explicit and avoids mixing async and sync session patterns in this assignment. The readiness check executes `SELECT 1` against PostgreSQL; liveness does not depend on the database. Phase 2 adds the operational and isolated evaluation schemas; recovery services and domain API routes do not exist yet.
+The API is a synchronous FastAPI application using SQLAlchemy 2.0 sessions with the psycopg 3 PostgreSQL driver. Synchronous database access keeps transaction boundaries explicit and avoids mixing async and sync session patterns in this assignment. The readiness check executes `SELECT 1` against PostgreSQL; liveness does not depend on the database. Phase 2 adds operational and isolated evaluation schemas; Phase 4 adds testable recovery decision/scheduling services. No recovery HTTP routes or provider dispatch are implemented.
 
 ### Requirements
 
@@ -106,3 +106,32 @@ python -m app.generation generate --profile scale --seed 20261022 --reference-ti
 ```
 
 The rebuild command uses `DATABASE_URL`, migrates to Alembic head, and writes the selected dataset. `generate` is idempotent for the same profile/config/reference time and rejects a different run until an explicit rebuild. Hash and export commands do not change the database. `MSG--01` remains unresolved and is not assigned to a message or template by this generator.
+
+## Phase 4: Recovery decisions
+
+The recovery decision engine is implemented as operational service functions in `app.services.recovery`; no HTTP handlers or provider dispatch are added. Use an explicit, timezone-aware evaluation timestamp and optionally pass a `RecoveryPolicy` override. The policy defaults remain provisional and configurable through the `RECOVERY_*` / `ABANDONED_CART_*` settings in `.env`; every decision stores both `policy_version` and a hash of the full policy configuration. `RecoveryDecision` history is append-only, and schedules link to their authorizing decision.
+
+The current provisional rules use an inclusive 60-minute inactivity threshold, require qualifying cart activity and a valid non-empty cart, block carts with configured purchase states, and fail closed on missing/unknown/denied/withdrawn channel consent. The fixed first-failure order is purchase, cart state/content/activity, customer state, consent, frequency, then campaign/template; therefore consent wins as the primary suppression reason when consent and a cap both block. Consent changes append `ConsentEvent` and advance the one-row-per-customer/channel projection only when the incoming `(occurred_at, event ID)` is newer. Frequency caps count only configured `SendAttempt` states (default `accepted`) over `(evaluated_at - 24h, evaluated_at]` and `(evaluated_at - 7d, evaluated_at]`; choose `[lower, upper]` explicitly if the lower endpoint should count. Their canonical suppression code is `FREQUENCY_CAP`, with `triggered_window` identifying the cap. Missing compatible campaigns use `NO_CAMPAIGN_TEMPLATE`. Campaigns/templates must be active and channel-matched; the tie-break is campaign business ID, mapping priority, then template business ID.
+
+Example service usage from a transaction:
+
+```python
+from app.core.config import get_settings
+from app.db.session import get_session_factory
+from app.services.recovery import RecoveryPolicy, create_logical_schedule
+
+settings = get_settings()
+policy = RecoveryPolicy.from_settings(settings)
+factory = get_session_factory(settings.database_url, settings.database_connect_timeout_seconds)
+
+with factory.begin() as session:
+	result = create_logical_schedule(
+		session,
+		cart_id="CART-2026-000001",
+		channel="email",
+		evaluated_at=settings.scenario_as_of,
+		policy=policy,
+	)
+```
+
+An ineligible evaluation returns a machine-readable suppression reason and durable decision evidence without creating a schedule. Identical request keys replay the stored schedule; incompatible key reuse raises `IdempotencyConflictError`. This phase does not dispatch messages, ingest engagement events, create orders, or calculate attribution.

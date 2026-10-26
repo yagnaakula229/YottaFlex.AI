@@ -8,6 +8,7 @@ from app.models.customer import Consent, ConsentEvent, Customer
 from app.models.generation import GenerationRun
 from app.models.messaging import MessageEvent, SendAttempt, SendSchedule
 from app.models.orders import Order
+from app.models.recovery import RecoveryDecision
 from app.models.session import CustomerSession
 
 __all__ = [
@@ -29,6 +30,7 @@ __all__ = [
     "MessageEvent",
     "MessageTemplate",
     "Order",
+    "RecoveryDecision",
     "SendAttempt",
     "SendSchedule",
 ]

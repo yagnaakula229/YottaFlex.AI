@@ -45,6 +45,7 @@ def generate_customers(
                 yield {
                     "business_id": consent_id,
                     "customer_id": customer_business_id,
+                    "last_event_id": f"CSE-{customer_number:06d}-{channel_code}-02",
                     "channel": channel,
                     "state": state,
                     "updated_at": updated_time,
@@ -80,15 +81,15 @@ def generate_customers(
 
     insert_batches(
         session,
-        Consent,
-        consent_records(),
+        ConsentEvent,
+        consent_event_records(),
         batch_size=config.batch_size,
         counts=counts,
     )
     insert_batches(
         session,
-        ConsentEvent,
-        consent_event_records(),
+        Consent,
+        consent_records(),
         batch_size=config.batch_size,
         counts=counts,
     )

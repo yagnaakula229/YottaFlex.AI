@@ -39,11 +39,15 @@ class Consent(Base):
     customer_id: Mapped[str] = mapped_column(
         String(64), ForeignKey("customer.business_id", name="fk_consent_customer"), nullable=False
     )
+    last_event_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("consent_event.business_id", name="fk_consent_last_event")
+    )
     channel: Mapped[str] = mapped_column(String(32), nullable=False)
     state: Mapped[str] = mapped_column(String(16), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     customer: Mapped[Customer] = relationship(back_populates="consents")
+    last_event: Mapped[ConsentEvent | None] = relationship(foreign_keys=[last_event_id])
 
 
 class ConsentEvent(Base):

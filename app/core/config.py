@@ -1,5 +1,6 @@
 import logging
 from datetime import UTC, datetime
+from typing import Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,6 +23,43 @@ class Settings(BaseSettings):
     test_database_url: str | None = None
     scenario_as_of: datetime = datetime(2026, 10, 22, tzinfo=UTC)
     database_connect_timeout_seconds: int = Field(default=5, ge=1, le=60)
+    recovery_policy_version: str = "recovery-v1-provisional"
+    abandoned_cart_inactivity_minutes: int = Field(default=60, ge=1)
+    recovery_qualifying_cart_event_types: tuple[str, ...] = (
+        "cart_created",
+        "cart_activity",
+        "cart_line_added",
+        "cart_line_updated",
+        "cart_line_removed",
+    )
+    recovery_purchase_blocking_statuses: tuple[str, ...] = ("pending", "paid", "refunded")
+    recovery_frequency_cap_24h: int = Field(default=1, ge=0)
+    recovery_frequency_cap_7d: int = Field(default=3, ge=0)
+    recovery_qualifying_attempt_states: tuple[str, ...] = ("accepted",)
+    recovery_rolling_window_boundary: Literal["(lower, upper]", "[lower, upper]"] = "(lower, upper]"
+    recovery_conversion_window_days: int = Field(default=7, ge=1)
+    recovery_campaign_selection_policy: Literal["campaign-id-priority-template-id-v1"] = (
+        "campaign-id-priority-template-id-v1"
+    )
+    recovery_use_cart_updated_at_fallback: bool = True
+    recovery_policy_version: str = "recovery-v1-provisional"
+    abandoned_cart_inactivity_minutes: int = Field(default=60, ge=1)
+    recovery_qualifying_cart_event_types: tuple[str, ...] = (
+        "cart_created",
+        "cart_activity",
+        "cart_line_added",
+        "cart_line_updated",
+        "cart_line_removed",
+    )
+    recovery_purchase_blocking_statuses: tuple[str, ...] = ("pending", "paid", "refunded")
+    recovery_frequency_cap_24h: int = Field(default=1, ge=0)
+    recovery_frequency_cap_7d: int = Field(default=3, ge=0)
+    recovery_qualifying_attempt_states: tuple[str, ...] = ("accepted",)
+    recovery_conversion_window_days: int = Field(default=7, ge=1)
+    recovery_campaign_selection_policy: Literal["campaign-id-priority-template-id-v1"] = (
+        "campaign-id-priority-template-id-v1"
+    )
+    recovery_use_cart_updated_at_fallback: bool = True
 
     @field_validator("database_url", "test_database_url")
     @classmethod

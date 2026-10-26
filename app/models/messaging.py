@@ -13,17 +13,22 @@ class SendSchedule(Base):
     __tablename__ = "send_schedule"
     __table_args__ = (
         UniqueConstraint("idempotency_key", name="uq_send_schedule_idempotency_key"),
+        CheckConstraint("length(request_fingerprint) = 64", name="request_fingerprint_length"),
         CheckConstraint(
             "status IN ('scheduled', 'processing', 'sent', 'suppressed', 'cancelled', 'failed')",
             name="status_valid",
         ),
         CheckConstraint("length(channel) > 0", name="channel_not_empty"),
+        CheckConstraint("length(policy_version) > 0", name="policy_version_not_empty"),
+        CheckConstraint("length(policy_configuration_hash) = 64", name="policy_hash_length"),
         Index("ix_send_schedule_due", "status", "scheduled_for"),
         Index("ix_send_schedule_customer_channel", "customer_id", "channel", "scheduled_for"),
+        Index("ix_send_schedule_recovery_decision", "recovery_decision_id"),
     )
 
     business_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
     customer_id: Mapped[str] = mapped_column(
         String(64), ForeignKey("customer.business_id", name="fk_send_schedule_customer"), nullable=False
     )
@@ -33,7 +38,12 @@ class SendSchedule(Base):
     campaign_id: Mapped[str] = mapped_column(
         String(64), ForeignKey("campaign.business_id", name="fk_send_schedule_campaign"), nullable=False
     )
+    recovery_decision_id: Mapped[str | None] = mapped_column(
+        String(64), ForeignKey("recovery_decision.business_id", name="fk_send_schedule_recovery_decision")
+    )
     channel: Mapped[str] = mapped_column(String(32), nullable=False)
+    policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    policy_configuration_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     scheduled_for: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -41,6 +51,7 @@ class SendSchedule(Base):
     cart: Mapped[Cart] = relationship(back_populates="schedules")
     customer: Mapped[Customer] = relationship()
     campaign: Mapped[Campaign] = relationship(back_populates="schedules")
+    recovery_decision: Mapped[RecoveryDecision | None] = relationship()
     attempts: Mapped[list[SendAttempt]] = relationship(back_populates="schedule")
 
 
