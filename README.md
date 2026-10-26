@@ -4,7 +4,7 @@ An end-to-end platform to identify abandoned shopping carts, enforce customer co
 
 ## Phase 1: Infrastructure
 
-The API is a synchronous FastAPI application using SQLAlchemy 2.0 sessions with the psycopg 3 PostgreSQL driver. Synchronous database access keeps transaction boundaries explicit and avoids mixing async and sync session patterns in this assignment. The readiness check executes `SELECT 1` against PostgreSQL; liveness does not depend on the database. No domain models, migration revisions, or recovery behavior exist yet.
+The API is a synchronous FastAPI application using SQLAlchemy 2.0 sessions with the psycopg 3 PostgreSQL driver. Synchronous database access keeps transaction boundaries explicit and avoids mixing async and sync session patterns in this assignment. The readiness check executes `SELECT 1` against PostgreSQL; liveness does not depend on the database. Phase 2 adds the operational and isolated evaluation schemas; recovery services and domain API routes do not exist yet.
 
 ### Requirements
 
@@ -47,6 +47,19 @@ These credentials are only for local development. Do not use them outside a loca
 docker compose exec -T postgres createdb -U yottaflex yottaflex_test
 ```
 
+### Apply migrations
+
+Migrate the application database using `DATABASE_URL` from `.env`, then migrate the separate test database by temporarily overriding that setting:
+
+```powershell
+python -m alembic upgrade head
+$env:DATABASE_URL = "postgresql+psycopg://yottaflex:local-dev-only@localhost:5432/yottaflex_test"
+python -m alembic upgrade head
+Remove-Item Env:DATABASE_URL
+```
+
+Alembic creates the operational tables and the separate PostgreSQL `evaluation` schema. No domain data is seeded by migrations.
+
 ### Run the API
 
 ```powershell
@@ -61,10 +74,7 @@ Open Swagger UI at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs). Hea
 python -m pytest -m unit
 python -m pytest -m integration
 python -m pytest
+python -m pytest -q
 ```
 
-The PostgreSQL integration test requires the configured `TEST_DATABASE_URL`. If it is absent, pytest reports that test as skipped; a skipped integration test is not a passing PostgreSQL verification. The current integration check only verifies connectivity and does not mutate the database.
-
-### Migrations
-
-Alembic is configured to load `DATABASE_URL` and `app.db.base.Base.metadata`. There are no migration revisions until domain schema work is approved in a later phase. Do not run `alembic upgrade head` until a revision exists.
+PostgreSQL integration tests require `TEST_DATABASE_URL` to point at a database migrated to the current Alembic head. If the URL is absent, pytest reports those tests as skipped; a skipped integration test is not PostgreSQL verification. Constraint tests run inside transactions that are rolled back.

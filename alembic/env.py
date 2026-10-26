@@ -5,13 +5,16 @@ from sqlalchemy import engine_from_config, pool
 
 from app.core.config import get_settings
 from app.db.base import Base
+from app.evaluation.base import EvaluationBase
+import app.evaluation.models
+import app.models
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 settings = get_settings()
-target_metadata = Base.metadata
+target_metadata = [Base.metadata, EvaluationBase.metadata]
 
 
 def database_url() -> str:
@@ -27,6 +30,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_schemas=True,
     )
 
     with context.begin_transaction():
@@ -47,8 +51,15 @@ def run_migrations_online() -> None:
             connection=connection,
             target_metadata=target_metadata,
             compare_type=True,
+            include_schemas=True,
         )
         with context.begin_transaction():
             context.run_migrations()
 
     connectable.dispose()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()

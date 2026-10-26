@@ -44,7 +44,7 @@ def test_readiness_executes_database_probe() -> None:
 
 
 def test_readiness_reports_missing_database_configuration() -> None:
-    application = create_app(Settings(_env_file=None))
+    application = create_app(Settings(_env_file=None, database_url=None))
 
     with TestClient(application) as client:
         response = client.get("/health/ready")

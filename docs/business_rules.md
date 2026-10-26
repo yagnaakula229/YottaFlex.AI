@@ -63,3 +63,16 @@ Store labels in a separate ground-truth boundary (for example, a distinct schema
 - Define retention and privacy requirements for customer, consent, message, and event records. Synthetic fixtures should contain no real personal data.
 - Define authorization for administrative/destructive endpoints and migration/data-reset scripts. Require explicit environment safeguards for destructive operations.
 - Use a fixed scenario/as-of timestamp for deterministic generation and evaluation. Decide its value and whether it is a generation parameter or a versioned dataset property; never substitute the machine's current time implicitly.
+
+## Phase 2 schema posture (provisional)
+
+The following storage choices are implementation defaults, not approved business policy. Their rationale and remaining questions are recorded in `docs/decision_log.md`.
+
+- Store business IDs as opaque `VARCHAR(64)` primary keys. Do not apply entity-specific formatting, parsing, or normalization. This keeps `MSG--01` representable without deciding whether it is a message or template ID.
+- Store monetary values as `NUMERIC(19, 4)` with a required three-character currency code on each monetary aggregate/line/order. Do not assume a single platform currency. Confirm minor-unit and rounding rules before services calculate totals.
+- Store one current consent row per customer/channel and append consent changes to `ConsentEvent`; event facts are not updated or deleted by application flows.
+- Use `CustomerSession` as the Python/database name for the required `Session` entity to avoid collisions with SQLAlchemy's `Session` class.
+- Use an opaque, required unique `idempotency_key` for each `SendSchedule`; its derivation and policy-version behavior are not encoded in the schema.
+- Model `Attribution` as the canonical per-order credit row, with a unique `order_id`. Candidate and decision history remain separate records.
+- Put ground-truth labels and evaluation-run metadata under PostgreSQL schema `evaluation`, with their own SQLAlchemy metadata and no ORM relationships to operational entities. Labels may store entity type and business ID as plain values; they do not create foreign keys into operational tables.
+- Use PostgreSQL check constraints for the initial lifecycle-state sets listed in `docs/decision_log.md`. Revisit those values with the domain owner before business services rely on them.

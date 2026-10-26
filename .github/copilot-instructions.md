@@ -29,7 +29,7 @@ The infrastructure setup provides these commands from an activated project virtu
 
 - Run the API: `python -m uvicorn app.main:app --reload`
 - Run unit tests: `python -m pytest -m unit`
-- Run PostgreSQL integration tests: `python -m pytest -m integration` (requires `TEST_DATABASE_URL`; otherwise the integration test is skipped)
+- Run PostgreSQL integration tests: `python -m pytest -m integration` (requires `TEST_DATABASE_URL` pointing to a database migrated to Alembic head; otherwise tests are skipped)
 - Run all tests: `python -m pytest`
 
-Alembic is configured in `alembic.ini` and reads `DATABASE_URL`; no migration revisions exist until a later schema phase. Do not report PostgreSQL integration tests as passing when they were skipped. Follow the exact PowerShell setup in `README.md`.
+Alembic is configured in `alembic.ini` and reads `DATABASE_URL`; the Phase 2 operational and evaluation schema migrations are in `alembic/versions/`. Do not report PostgreSQL integration tests as passing when they were skipped. Follow the exact PowerShell setup and per-database migration commands in `README.md`.

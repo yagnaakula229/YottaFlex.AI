@@ -1,0 +1,1 @@
+"""Evaluation-only persistence, isolated from operational model metadata."""
