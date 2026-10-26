@@ -19,6 +19,12 @@ class GenerationRun(Base):
 
     business_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     seed: Mapped[int] = mapped_column(Integer, nullable=False)
+    profile: Mapped[str] = mapped_column(String(16), nullable=False)
+    configuration_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    generator_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    requested_counts: Mapped[dict[str, int]] = mapped_column(JSONB, nullable=False)
+    actual_counts: Mapped[dict[str, int | str]] = mapped_column(JSONB, nullable=False)
+    reference_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     scenario_as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

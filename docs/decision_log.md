@@ -51,3 +51,9 @@ Event type columns remain strings rather than PostgreSQL enum types so provider-
 10. Audit-event retention, actor identity, deletion policy, and whether audit rows need cryptographic tamper evidence.
 
 These choices do not prevent the structural migration below: unresolved behavior is represented with opaque identifiers, independent currency columns, append-only event tables, nullable links where semantics are not fixed, and explicit checks for the current provisional state sets. Do not implement domain services based on these provisional defaults until they are approved.
+
+## Phase 3 generation boundary
+
+- Normal profile generation produces clean operational records only. The four evaluation labels are present with `expected=false`; no deliberate anomaly facts are injected into operational tables. Constructing positive anomaly fixtures remains separate work because some cases intentionally contradict operational policy and need explicit fixture authorization.
+- No attribution decisions, candidates, or canonical credits are generated until attribution touch eligibility, window anchoring, and tie-breaking are approved. Generated orders remain unattributed.
+- Scale profile `abandoned_carts=20,000` means carts whose generated `Cart.status` is `abandoned`, whose `updated_at` is at least the configured inactivity interval before `reference_time`, and which have no linked order. Consent/frequency eligibility is applied after that cart state; actual schedules/attempts may be lower.

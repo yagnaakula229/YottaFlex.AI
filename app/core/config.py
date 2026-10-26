@@ -1,4 +1,5 @@
 import logging
+from datetime import UTC, datetime
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,6 +20,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     database_url: str | None = None
     test_database_url: str | None = None
+    scenario_as_of: datetime = datetime(2026, 10, 22, tzinfo=UTC)
     database_connect_timeout_seconds: int = Field(default=5, ge=1, le=60)
 
     @field_validator("database_url", "test_database_url")

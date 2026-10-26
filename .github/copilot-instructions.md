@@ -31,5 +31,8 @@ The infrastructure setup provides these commands from an activated project virtu
 - Run unit tests: `python -m pytest -m unit`
 - Run PostgreSQL integration tests: `python -m pytest -m integration` (requires `TEST_DATABASE_URL` pointing to a database migrated to Alembic head; otherwise tests are skipped)
 - Run all tests: `python -m pytest`
+- Generate a profile: `python -m app.generation generate --profile small --seed 20261022`
+- Rebuild development data: `python -m app.generation rebuild --profile small --seed 20261022 --confirm-destructive` (requires development environment and local allowlisted database)
+- Hash/export generated data: `python -m app.generation hash` / `python -m app.generation export --output synthetic-data.jsonl`
 
 Alembic is configured in `alembic.ini` and reads `DATABASE_URL`; the Phase 2 operational and evaluation schema migrations are in `alembic/versions/`. Do not report PostgreSQL integration tests as passing when they were skipped. Follow the exact PowerShell setup and per-database migration commands in `README.md`.
