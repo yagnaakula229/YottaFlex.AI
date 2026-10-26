@@ -1,3 +1,70 @@
 # YottaFlex AI - Abandoned Cart Recovery Platform
 
 An end-to-end platform to identify abandoned shopping carts, enforce customer consent, coordinate personalized recovery campaigns, and measure attributed conversions.
+
+## Phase 1: Infrastructure
+
+The API is a synchronous FastAPI application using SQLAlchemy 2.0 sessions with the psycopg 3 PostgreSQL driver. Synchronous database access keeps transaction boundaries explicit and avoids mixing async and sync session patterns in this assignment. The readiness check executes `SELECT 1` against PostgreSQL; liveness does not depend on the database. No domain models, migration revisions, or recovery behavior exist yet.
+
+### Requirements
+
+- Python 3.11 or newer
+- Docker Desktop with Docker Compose
+
+### Install (Windows PowerShell)
+
+Run from the repository root:
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
+```
+
+If PowerShell blocks activation, allow scripts for the current user with `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`, then activate the environment.
+
+### Configure PostgreSQL
+
+Create a local `.env` with development-only values and start PostgreSQL. The Compose service creates both the application database and a separate integration-test database on first initialization of its data volume.
+
+```powershell
+Copy-Item .env.example .env
+@'
+APP_NAME=YottaFlex AI
+ENVIRONMENT=development
+LOG_LEVEL=INFO
+DATABASE_URL=postgresql+psycopg://yottaflex:local-dev-only@localhost:5432/yottaflex
+TEST_DATABASE_URL=postgresql+psycopg://yottaflex:local-dev-only@localhost:5432/yottaflex_test
+DATABASE_CONNECT_TIMEOUT_SECONDS=5
+'@ | Set-Content -Encoding ascii .env
+docker compose up -d postgres
+```
+
+These credentials are only for local development. Do not use them outside a local environment. The init script runs only when PostgreSQL initializes an empty data volume. If the volume already existed before the test database was added, create it once with:
+
+```powershell
+docker compose exec -T postgres createdb -U yottaflex yottaflex_test
+```
+
+### Run the API
+
+```powershell
+python -m uvicorn app.main:app --reload
+```
+
+Open Swagger UI at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs). Health endpoints are `/health/live` and `/health/ready`.
+
+### Run tests
+
+```powershell
+python -m pytest -m unit
+python -m pytest -m integration
+python -m pytest
+```
+
+The PostgreSQL integration test requires the configured `TEST_DATABASE_URL`. If it is absent, pytest reports that test as skipped; a skipped integration test is not a passing PostgreSQL verification. The current integration check only verifies connectivity and does not mutate the database.
+
+### Migrations
+
+Alembic is configured to load `DATABASE_URL` and `app.db.base.Base.metadata`. There are no migration revisions until domain schema work is approved in a later phase. Do not run `alembic upgrade head` until a revision exists.
