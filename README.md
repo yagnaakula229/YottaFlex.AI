@@ -58,6 +58,12 @@ The four anomaly scenarios are set up together by `test_required_anomaly_scenari
 
 ### Architecture
 
+#### Component architecture
+
+![YottaFlex.AI component architecture showing the demo interface, recovery and execution services, generation and evaluation workflows, and PostgreSQL persistence](docs/diagram.png)
+
+*Detailed component and data-flow diagram for the current implementation.*
+
 ```mermaid
 flowchart LR
     Browser[React 19 / Vite frontend] -->|HTTP demo summary| API[FastAPI]
