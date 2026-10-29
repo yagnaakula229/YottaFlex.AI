@@ -12,21 +12,28 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.base import Base
 from app.evaluation.base import EvaluationBase
+from app.evaluation.anomaly_fixtures import detect_attribution_fixture_anomalies
+from app.evaluation.models import EvaluationRun, GroundTruthLabel
 from app.generation.config import GenerationConfig
 from app.generation.pipeline import generate_dataset
 from app.models import (
+    Attribution,
     Campaign,
     Cart,
+    CartEvent,
     CartLine,
     Consent,
     ConsentEvent,
     Customer,
+    MessageEvent,
     MessageTemplate,
     Order,
     RecoveryDecision,
     SendAttempt,
     SendSchedule,
 )
+from app.services.execution.dispatch import dispatch_schedule_attempt
+from app.services.attribution.service import evaluate_order_attribution
 from app.services.recovery.abandonment import evaluate_cart_abandonment
 from app.services.recovery.consent import record_consent_change, resolve_effective_consent
 from app.services.recovery.eligibility import (
@@ -37,6 +44,7 @@ from app.services.recovery.eligibility import (
 from app.services.recovery.errors import IdempotencyConflictError
 from app.services.recovery.policy import RecoveryPolicy
 from app.services.recovery.scheduling import create_logical_schedule, schedule_idempotency_key
+from app.services.validation.anomalies import detect_operational_anomalies
 
 pytestmark = pytest.mark.integration
 REFERENCE_TIME = datetime(2026, 10, 22, 12, 0, tzinfo=UTC)
@@ -477,6 +485,232 @@ def test_consent_reason_precedes_frequency_cap_when_both_block(generated_small_d
         assert result.reason_code == "consent_withdrawn"
         assert result.decision.evidence["consent"]["reason_code"] == "consent_withdrawn"
         assert "frequency_cap" not in result.decision.evidence
+
+
+def test_dispatch_rechecks_withdrawn_consent_before_creating_attempt(generated_small_db) -> None:
+    with Session(generated_small_db) as session, session.begin():
+        cart = select_eligible_email_cart(session)
+        creation = create_logical_schedule(
+            session,
+            cart_id=cart.business_id,
+            channel="email",
+            evaluated_at=EVALUATION_TIME,
+        )
+        assert creation.eligible and creation.schedule is not None
+        schedule = creation.schedule
+
+        withdrawn_at = EVALUATION_TIME + timedelta(minutes=1)
+        record_consent_change(
+            session,
+            customer_id=cart.customer_id,
+            channel="email",
+            state="denied",
+            event_type="consent_revoked",
+            source_system="execution-recheck-test",
+            source_event_key="execution-recheck-withdrawal",
+            occurred_at=withdrawn_at,
+            recorded_at=withdrawn_at,
+        )
+
+        result = dispatch_schedule_attempt(
+            session,
+            schedule,
+            attempted_at=EVALUATION_TIME + timedelta(minutes=2),
+            force_outcome="accepted",
+        )
+
+        assert result.eligible is False
+        assert result.reason_code == "consent_withdrawn"
+        assert result.attempt is None
+        assert schedule.status == "suppressed"
+        assert session.scalar(
+            select(func.count(SendAttempt.business_id)).where(
+                SendAttempt.schedule_id == schedule.business_id
+            )
+        ) == 0
+
+
+def test_required_anomaly_scenarios_are_detected_and_labels_stay_separate(generated_small_db) -> None:
+    with Session(generated_small_db) as session, session.begin():
+        evaluation_run = session.scalar(select(EvaluationRun))
+        assert evaluation_run is not None
+
+        schedule = session.scalar(select(SendSchedule).order_by(SendSchedule.business_id).limit(1))
+        assert schedule is not None
+        attempt = session.scalar(
+            select(SendAttempt)
+            .where(SendAttempt.schedule_id == schedule.business_id)
+            .order_by(SendAttempt.attempt_number.desc())
+            .limit(1)
+        )
+        assert attempt is not None
+        withdrawal_at = attempt.attempted_at - timedelta(seconds=1)
+        withdrawal = record_consent_change(
+            session,
+            customer_id=schedule.customer_id,
+            channel=schedule.channel,
+            state="denied",
+            event_type="consent_revoked",
+            source_system="anomaly-fixture",
+            source_event_key="anomaly-withdrawal",
+            occurred_at=withdrawal_at,
+            recorded_at=withdrawal_at,
+        )
+        sent_at = attempt.attempted_at
+        session.add(
+            MessageEvent(
+                business_id="ME-ANOMALY-OPT-OUT",
+                send_attempt_id=attempt.business_id,
+                event_type="sent",
+                source_system="anomaly-fixture",
+                source_event_key="anomaly-sent-after-withdrawal",
+                occurred_at=sent_at,
+                recorded_at=sent_at,
+                payload={"fixture": "message_sent_after_opt_out"},
+            )
+        )
+
+        purchased_order = session.scalar(
+            select(Order).where(Order.status == "paid").order_by(Order.business_id).limit(1)
+        )
+        assert purchased_order is not None and purchased_order.cart_id is not None
+        abandoned_cart = session.get(Cart, purchased_order.cart_id)
+        assert abandoned_cart is not None
+        abandoned_at = purchased_order.placed_at + timedelta(hours=1)
+        abandoned_cart.status = "abandoned"
+        abandoned_cart.updated_at = abandoned_at
+        session.add(
+            CartEvent(
+                business_id="CE-ANOMALY-POST-PURCHASE",
+                cart_id=abandoned_cart.business_id,
+                event_type="cart_abandoned",
+                source_system="anomaly-fixture",
+                source_event_key="anomaly-cart-abandoned-after-purchase",
+                occurred_at=abandoned_at,
+                recorded_at=abandoned_at,
+                payload={"fixture": "cart_abandoned_after_purchase"},
+            )
+        )
+
+        stale_line = session.scalar(
+            select(CartLine).order_by(CartLine.business_id).limit(1)
+        )
+        assert stale_line is not None
+        stale_cart = session.get(Cart, stale_line.cart_id)
+        assert stale_cart is not None
+        stale_cart_id = stale_cart.business_id
+        stale_line.quantity += 1
+
+        session.add(
+            Attribution(
+                business_id="ATTR-ANOMALY-CANONICAL",
+                order_id=purchased_order.business_id,
+                campaign_id="CMP-2026-000001",
+                credited_amount=None,
+                currency_code=purchased_order.currency_code,
+                created_at=EVALUATION_TIME,
+            )
+        )
+        session.flush()
+        evaluation_run.results = {
+            **evaluation_run.results,
+            "anomaly_fixtures": {
+                "attribution_double_counted": [
+                    {
+                        "order_id": purchased_order.business_id,
+                        "credits": [
+                            {
+                                "attribution_id": "LEGACY-ATTR-CROSS-CAMPAIGN-A",
+                                "campaign_id": "CMP-2026-000001",
+                            },
+                            {
+                                "attribution_id": "LEGACY-ATTR-CROSS-CAMPAIGN-B",
+                                "campaign_id": "CMP-2026-000002",
+                            },
+                        ],
+                    }
+                ]
+            },
+        }
+        with pytest.raises(IntegrityError):
+            with session.begin_nested():
+                session.add(
+                    Attribution(
+                        business_id="ATTR-ANOMALY-DUPLICATE",
+                        order_id=purchased_order.business_id,
+                        campaign_id="CMP-2026-000002",
+                        credited_amount=None,
+                        currency_code=purchased_order.currency_code,
+                        created_at=EVALUATION_TIME,
+                    )
+                )
+                session.flush()
+        canonical = session.scalar(
+            select(Attribution).where(Attribution.order_id == purchased_order.business_id)
+        )
+        assert canonical is not None
+        assert evaluate_order_attribution(
+            session,
+            purchased_order,
+            policy_version="click-last-touch-7d-v1",
+        ) is canonical
+
+        labels = [
+            GroundTruthLabel(
+                business_id=f"GT-ANOMALY-{index:02d}",
+                evaluation_run_id=evaluation_run.business_id,
+                label_code=label_code,
+                entity_type=entity_type,
+                entity_business_id=entity_id,
+                expected=expected,
+                label_payload={"fixture": "required-anomaly-scenarios"},
+                recorded_at=EVALUATION_TIME,
+            )
+            for index, (label_code, entity_type, entity_id, expected) in enumerate(
+                (
+                    ("message_sent_after_opt_out", "message_event", "ME-ANOMALY-OPT-OUT", True),
+                    (
+                        "cart_abandoned_after_purchase",
+                        "cart",
+                        abandoned_cart.business_id,
+                        True,
+                    ),
+                    ("stale_cart_total_after_quantity_update", "cart", stale_cart_id, True),
+                    ("attribution_double_counted", "order", purchased_order.business_id, True),
+                ),
+                start=1,
+            )
+        ]
+        session.add_all(labels)
+        session.flush()
+
+        findings = detect_operational_anomalies(session)
+        fixture_findings = detect_attribution_fixture_anomalies(evaluation_run.results)
+        detected = {finding.issue_type for finding in [*findings, *fixture_findings]}
+        expected_positive = {
+            label.label_code
+            for label in session.scalars(
+                select(GroundTruthLabel).where(
+                    GroundTruthLabel.evaluation_run_id == evaluation_run.business_id,
+                    GroundTruthLabel.expected.is_(True),
+                    GroundTruthLabel.business_id.like("GT-ANOMALY-%"),
+                )
+            )
+        }
+        assert expected_positive == {
+            "message_sent_after_opt_out",
+            "cart_abandoned_after_purchase",
+            "stale_cart_total_after_quantity_update",
+            "attribution_double_counted",
+        }
+        assert expected_positive <= detected
+        assert any(
+            finding.entity_business_id == purchased_order.business_id
+            for finding in fixture_findings
+        )
+        assert all(finding.issue_type != "attribution_double_counted" for finding in findings)
+        assert withdrawal.business_id
+        assert purchased_order.business_id
 
 
 def test_schedule_creation_is_idempotent_and_incompatible_reuse_conflicts(generated_small_db) -> None:

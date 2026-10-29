@@ -1,8 +1,10 @@
 from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import String
 
 from app.generation.config import GenerationConfig
+from app.generation.export import _csv_value, _sql_literal
 from app.generation.ids import (
     campaign_id,
     cart_id,
@@ -42,6 +44,7 @@ def test_scale_profile_requests_documented_targets_and_send_cap() -> None:
 
     assert config.requested_counts["carts"] == 50_000
     assert config.requested_counts["abandoned_carts"] == 20_000
+    assert config.requested_counts["campaigns"] == 10_000
     assert config.requested_counts["max_send_attempts"] == 10_000
 
 
@@ -69,3 +72,12 @@ def test_destructive_rebuild_requires_explicit_local_development_target() -> Non
     ):
         with pytest.raises(PermissionError):
             validate_destructive_target(database_url, environment, confirmed)
+
+
+def test_sql_export_escapes_quotes_and_control_characters() -> None:
+    assert _sql_literal("O'Reilly\nnext", String()) == "E'O''Reilly\\nnext'"
+
+
+def test_csv_export_distinguishes_null_from_literal_null_sentinel() -> None:
+    assert _csv_value(None, String()) == r"\N"
+    assert _csv_value(r"\N", String()) == r"\\N"

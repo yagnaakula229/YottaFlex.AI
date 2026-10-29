@@ -17,6 +17,7 @@ class Profile:
     cart_count: int
     abandoned_cart_count: int
     converted_cart_count: int
+    campaign_count: int
 
     @property
     def customer_count(self) -> int:
@@ -24,11 +25,12 @@ class Profile:
 
 
 PROFILES: dict[ProfileName, Profile] = {
-    "small": Profile(cart_count=100, abandoned_cart_count=40, converted_cart_count=10),
+    "small": Profile(cart_count=100, abandoned_cart_count=40, converted_cart_count=10, campaign_count=3),
     "scale": Profile(
         cart_count=50_000,
         abandoned_cart_count=20_000,
         converted_cart_count=5_000,
+        campaign_count=10_000,
     ),
 }
 
@@ -82,6 +84,7 @@ class GenerationConfig:
             "abandoned_carts": self.counts.abandoned_cart_count,
             "converted_carts": self.counts.converted_cart_count,
             "orders": self.counts.converted_cart_count,
+            "campaigns": self.counts.campaign_count,
             "max_send_attempts": min(self.max_send_attempts, MAX_SEND_ATTEMPTS, self.counts.abandoned_cart_count),
         }
 

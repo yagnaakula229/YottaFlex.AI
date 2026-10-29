@@ -1,8 +1,10 @@
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
+from threading import Barrier
 
 import pytest
-from sqlalchemy import create_engine, inspect, select, text, update
+from sqlalchemy import create_engine, func, inspect, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from sqlalchemy.engine import make_url
@@ -397,44 +399,47 @@ def test_message_event_same_key_conflicting_payload_is_rejected(db_session: Sess
 
 
 def test_message_event_concurrent_duplicate_inserts_from_two_sessions_are_rejected(db_session: Session) -> None:
-    attempt = add_message_event_dependencies(db_session)
-    with Session(db_session.bind, expire_on_commit=False) as session_a, session_a.begin():
-        session_a.add(
-            MessageEvent(
-                business_id="MSE-CONCURRENT-A",
-                send_attempt_id=attempt.business_id,
-                event_type="opened",
-                source_system="provider-a",
-                source_event_key="evt-concurrent-key",
-                occurred_at=FIXED_TIME,
-                recorded_at=FIXED_TIME,
-                payload={"message_id": "MSG-CONCURRENT", "status": "opened"},
-            )
-        )
-        session_a.flush()
+    engine = db_session.get_bind().engine
+    with Session(engine) as setup_session, setup_session.begin():
+        attempt = add_message_event_dependencies(setup_session)
+        send_attempt_id = attempt.business_id
 
-    with Session(db_session.bind, expire_on_commit=False) as session_b, session_b.begin():
-        with pytest.raises(IntegrityError):
-            session_b.add(
-                MessageEvent(
-                    business_id="MSE-CONCURRENT-B",
-                    send_attempt_id=attempt.business_id,
-                    event_type="opened",
-                    source_system="provider-a",
-                    source_event_key="evt-concurrent-key",
-                    occurred_at=FIXED_TIME,
-                    recorded_at=FIXED_TIME,
-                    payload={"message_id": "MSG-CONCURRENT", "status": "opened"},
+    insert_barrier = Barrier(2)
+
+    def insert_duplicate(business_id: str) -> str:
+        try:
+            with Session(engine) as session, session.begin():
+                insert_barrier.wait(timeout=10)
+                session.add(
+                    MessageEvent(
+                        business_id=business_id,
+                        send_attempt_id=send_attempt_id,
+                        event_type="opened",
+                        source_system="provider-a",
+                        source_event_key="evt-concurrent-key",
+                        occurred_at=FIXED_TIME,
+                        recorded_at=FIXED_TIME,
+                        payload={"message_id": "MSG-CONCURRENT", "status": "opened"},
+                    )
                 )
-            )
-            session_b.flush()
+                session.flush()
+            return "inserted"
+        except IntegrityError:
+            return "duplicate"
 
-    count = db_session.scalar(
-        select(func.count()).select_from(MessageEvent).where(
-            MessageEvent.source_system == "provider-a",
-            MessageEvent.source_event_key == "evt-concurrent-key",
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(
+            executor.map(insert_duplicate, ("MSE-CONCURRENT-A", "MSE-CONCURRENT-B"))
         )
-    )
+
+    assert sorted(outcomes) == ["duplicate", "inserted"]
+    with Session(engine) as verification_session:
+        count = verification_session.scalar(
+            select(func.count()).select_from(MessageEvent).where(
+                MessageEvent.source_system == "provider-a",
+                MessageEvent.source_event_key == "evt-concurrent-key",
+            )
+        )
     assert count == 1
 
 

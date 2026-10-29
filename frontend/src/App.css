@@ -126,6 +126,12 @@
   font-weight: 700;
 }
 
+.list li.empty-state {
+  display: block;
+  color: #94a3b8;
+  font-style: italic;
+}
+
 .attribution-row {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

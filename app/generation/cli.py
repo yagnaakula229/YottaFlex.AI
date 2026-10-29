@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.db.session import get_session_factory
 from app.generation.config import GenerationConfig, ProfileName
-from app.generation.export import export_dataset, hash_dataset
+from app.generation.export import export_csv, export_dataset, export_sql, hash_dataset
 from app.generation.pipeline import generate_dataset
 from app.generation.reset import rebuild_schema, validate_destructive_target
 
@@ -105,21 +105,30 @@ def _hash() -> int:
     return 0
 
 
-def _export(output_path: str) -> int:
+def _export(output_path: str, output_format: str) -> int:
     database_url, timeout = _database_settings()
     factory = get_session_factory(database_url, timeout)
-    if output_path == "-":
-        output = sys.stdout
-        close_output = False
-    else:
-        output = Path(output_path).open("w", encoding="utf-8", newline="\n")
-        close_output = True
-    try:
+    if output_format == "csv":
+        if output_path == "-":
+            raise ValueError("CSV export requires --output to name an empty directory")
         with factory() as session:
-            digest = export_dataset(session, output)
-    finally:
-        if close_output:
-            output.close()
+            digest = export_csv(session, output_path)
+    else:
+        if output_path == "-":
+            output = sys.stdout
+            close_output = False
+        else:
+            output = Path(output_path).open("w", encoding="utf-8", newline="\n")
+            close_output = True
+        try:
+            with factory() as session:
+                if output_format == "sql":
+                    digest = export_sql(session, output)
+                else:
+                    digest = export_dataset(session, output)
+        finally:
+            if close_output:
+                output.close()
     print(f"sha256={digest}", file=sys.stderr)
     return 0
 
@@ -140,6 +149,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("hash")
     export_parser = subparsers.add_parser("export")
     export_parser.add_argument("--output", default="-")
+    export_parser.add_argument("--format", choices=("jsonl", "csv", "sql"), default="jsonl")
     return parser
 
 
@@ -153,7 +163,7 @@ def main() -> int:
             return _generate(arguments, rebuild=True)
         if arguments.command == "hash":
             return _hash()
-        return _export(arguments.output)
+        return _export(arguments.output, arguments.format)
     except Exception as exc:
         parser.exit(2, f"generation failed: {exc}\n")
 

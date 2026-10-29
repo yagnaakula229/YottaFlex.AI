@@ -23,7 +23,7 @@ def generate_campaigns(
     counts: dict[str, int],
 ) -> None:
     created_at = config.reference_time - timedelta(days=30)
-    campaign_count = 3
+    campaign_count = config.counts.campaign_count
     templates_per_campaign = 2
     template_count = campaign_count * templates_per_campaign
 
