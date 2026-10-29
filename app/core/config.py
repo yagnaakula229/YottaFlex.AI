@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     database_url: str | None = None
     test_database_url: str | None = None
+    cors_allow_origins: tuple[str, ...] = (
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    )
     scenario_as_of: datetime = datetime(2026, 10, 22, tzinfo=UTC)
     database_connect_timeout_seconds: int = Field(default=5, ge=1, le=60)
     recovery_policy_version: str = "recovery-v1-provisional"
@@ -61,21 +67,31 @@ class Settings(BaseSettings):
     )
     recovery_use_cart_updated_at_fallback: bool = True
 
+    @staticmethod
+    def _is_placeholder_database_url(value: str) -> bool:
+        upper_value = value.upper()
+        placeholder_tokens = ("USER", "PASSWORD", "DB_NAME", "DB_NAME_TEST")
+        return any(token in upper_value for token in placeholder_tokens)
+
     @field_validator("database_url", "test_database_url")
     @classmethod
     def validate_database_url(cls, value: str | None) -> str | None:
-        if value is None or not value.strip():
+        if value is None or not str(value).strip():
+            return None
+
+        normalized = str(value).strip()
+        if cls._is_placeholder_database_url(normalized):
             return None
 
         try:
-            url = make_url(value)
+            url = make_url(normalized)
         except ArgumentError as exc:
             raise ValueError("Database URLs must be valid PostgreSQL URLs.") from exc
 
         if url.drivername != "postgresql+psycopg":
             raise ValueError("Database URLs must use the postgresql+psycopg driver.")
 
-        return value
+        return normalized
 
     @field_validator("log_level")
     @classmethod

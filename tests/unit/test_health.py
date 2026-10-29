@@ -58,6 +58,11 @@ def test_database_url_must_use_psycopg_postgresql_driver() -> None:
         Settings(_env_file=None, database_url="sqlite:///not-postgresql.db")
 
 
+def test_placeholder_database_urls_are_treated_as_unconfigured() -> None:
+    assert Settings(_env_file=None, database_url="postgresql+psycopg://USER:PASSWORD@localhost:5432/DB_NAME") is not None
+    assert Settings(_env_file=None, database_url="postgresql+psycopg://USER:PASSWORD@localhost:5432/DB_NAME") == Settings(_env_file=None, database_url=None)
+
+
 def test_json_formatter_includes_structured_fields() -> None:
     from app.core.logging import JsonFormatter
 

@@ -3,8 +3,10 @@ from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.api.routes.demo import router as demo_router
 from app.api.routes.health import router as health_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
@@ -40,8 +42,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         title=app_settings.app_name,
         lifespan=lifespan,
     )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(app_settings.cors_allow_origins),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     application.state.settings = app_settings
     application.include_router(health_router)
+    application.include_router(demo_router)
 
     @application.exception_handler(DatabaseNotConfiguredError)
     async def database_not_configured(

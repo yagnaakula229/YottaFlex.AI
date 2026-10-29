@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -20,9 +20,12 @@ from app.models import (
     Consent,
     ConsentEvent,
     Customer,
+    MessageEvent,
     Order,
+    SendAttempt,
     SendSchedule,
 )
+from app.services.message_events.service import ingest_message_event
 
 pytestmark = pytest.mark.integration
 FIXED_TIME = datetime(2026, 10, 22, 12, 0, tzinfo=UTC)
@@ -279,6 +282,214 @@ def test_order_has_at_most_one_canonical_attribution(db_session: Session) -> Non
                 )
             )
             db_session.flush()
+
+
+def add_message_event_dependencies(db_session: Session) -> SendAttempt:
+    customer, campaign, cart, _ = add_dependencies(db_session)
+    schedule = SendSchedule(
+        business_id="SEND-2026-000001",
+        idempotency_key="schedule-key-message-events",
+        request_fingerprint="c" * 64,
+        customer_id=customer.business_id,
+        cart_id=cart.business_id,
+        campaign_id=campaign.business_id,
+        channel="email",
+        policy_version="test-v1",
+        policy_configuration_hash="d" * 64,
+        status="sent",
+        scheduled_for=FIXED_TIME,
+        created_at=FIXED_TIME,
+    )
+    attempt = SendAttempt(
+        business_id="SATT-2026-000001",
+        schedule_id=schedule.business_id,
+        attempt_number=1,
+        status="accepted",
+        attempted_at=FIXED_TIME,
+        provider_reference="provider-a-ref",
+        error_detail=None,
+    )
+    db_session.add_all([schedule, attempt])
+    db_session.flush()
+    return attempt
+
+
+def test_message_event_same_key_duplicate_insertion_preserves_original_row(db_session: Session) -> None:
+    attempt = add_message_event_dependencies(db_session)
+    original = MessageEvent(
+        business_id="MSE-ORIGINAL",
+        send_attempt_id=attempt.business_id,
+        event_type="sent",
+        source_system="provider-a",
+        source_event_key="evt-duplicate-key",
+        occurred_at=FIXED_TIME,
+        recorded_at=FIXED_TIME,
+        payload={"message_id": "MSG-1", "status": "queued"},
+    )
+    db_session.add(original)
+    db_session.flush()
+
+    with pytest.raises(IntegrityError):
+        with db_session.begin_nested():
+            db_session.add(
+                MessageEvent(
+                    business_id="MSE-DUPLICATE",
+                    send_attempt_id=attempt.business_id,
+                    event_type="sent",
+                    source_system="provider-a",
+                    source_event_key="evt-duplicate-key",
+                    occurred_at=FIXED_TIME,
+                    recorded_at=FIXED_TIME,
+                    payload={"message_id": "MSG-1", "status": "queued"},
+                )
+            )
+            db_session.flush()
+
+    matches = db_session.scalars(
+        select(MessageEvent).where(
+            MessageEvent.source_system == "provider-a",
+            MessageEvent.source_event_key == "evt-duplicate-key",
+        )
+    ).all()
+    assert len(matches) == 1
+    assert matches[0].business_id == original.business_id
+
+
+def test_message_event_same_key_conflicting_payload_is_rejected(db_session: Session) -> None:
+    attempt = add_message_event_dependencies(db_session)
+    original = MessageEvent(
+        business_id="MSE-CONFLICT-ORIGINAL",
+        send_attempt_id=attempt.business_id,
+        event_type="sent",
+        source_system="provider-a",
+        source_event_key="evt-conflicting-key",
+        occurred_at=FIXED_TIME,
+        recorded_at=FIXED_TIME,
+        payload={"message_id": "MSG-1", "status": "queued"},
+    )
+    db_session.add(original)
+    db_session.flush()
+
+    with pytest.raises(IntegrityError):
+        with db_session.begin_nested():
+            db_session.add(
+                MessageEvent(
+                    business_id="MSE-CONFLICT-RETRY",
+                    send_attempt_id=attempt.business_id,
+                    event_type="sent",
+                    source_system="provider-a",
+                    source_event_key="evt-conflicting-key",
+                    occurred_at=FIXED_TIME,
+                    recorded_at=FIXED_TIME,
+                    payload={"message_id": "MSG-1", "status": "bounced"},
+                )
+            )
+            db_session.flush()
+
+    matches = db_session.scalars(
+        select(MessageEvent).where(
+            MessageEvent.source_system == "provider-a",
+            MessageEvent.source_event_key == "evt-conflicting-key",
+        )
+    ).all()
+    assert len(matches) == 1
+    assert matches[0].payload["status"] == "queued"
+
+
+def test_message_event_concurrent_duplicate_inserts_from_two_sessions_are_rejected(db_session: Session) -> None:
+    attempt = add_message_event_dependencies(db_session)
+    with Session(db_session.bind, expire_on_commit=False) as session_a, session_a.begin():
+        session_a.add(
+            MessageEvent(
+                business_id="MSE-CONCURRENT-A",
+                send_attempt_id=attempt.business_id,
+                event_type="opened",
+                source_system="provider-a",
+                source_event_key="evt-concurrent-key",
+                occurred_at=FIXED_TIME,
+                recorded_at=FIXED_TIME,
+                payload={"message_id": "MSG-CONCURRENT", "status": "opened"},
+            )
+        )
+        session_a.flush()
+
+    with Session(db_session.bind, expire_on_commit=False) as session_b, session_b.begin():
+        with pytest.raises(IntegrityError):
+            session_b.add(
+                MessageEvent(
+                    business_id="MSE-CONCURRENT-B",
+                    send_attempt_id=attempt.business_id,
+                    event_type="opened",
+                    source_system="provider-a",
+                    source_event_key="evt-concurrent-key",
+                    occurred_at=FIXED_TIME,
+                    recorded_at=FIXED_TIME,
+                    payload={"message_id": "MSG-CONCURRENT", "status": "opened"},
+                )
+            )
+            session_b.flush()
+
+    count = db_session.scalar(
+        select(func.count()).select_from(MessageEvent).where(
+            MessageEvent.source_system == "provider-a",
+            MessageEvent.source_event_key == "evt-concurrent-key",
+        )
+    )
+    assert count == 1
+
+
+def test_message_event_update_and_delete_are_rejected_by_append_only_trigger(db_session: Session) -> None:
+    attempt = add_message_event_dependencies(db_session)
+    event = MessageEvent(
+        business_id="MSE-APPEND-ONLY",
+        send_attempt_id=attempt.business_id,
+        event_type="clicked",
+        source_system="provider-a",
+        source_event_key="evt-append-only",
+        occurred_at=FIXED_TIME,
+        recorded_at=FIXED_TIME,
+        payload={"message_id": "MSG-APPEND", "status": "clicked"},
+    )
+    db_session.add(event)
+    db_session.flush()
+
+    with pytest.raises(IntegrityError):
+        with db_session.begin_nested():
+            db_session.execute(
+                update(MessageEvent)
+                .where(MessageEvent.business_id == event.business_id)
+                .values(payload={"message_id": "MSG-APPEND", "status": "replayed"})
+            )
+            db_session.flush()
+
+    with pytest.raises(IntegrityError):
+        with db_session.begin_nested():
+            db_session.execute(
+                MessageEvent.__table__.delete().where(MessageEvent.business_id == event.business_id)
+            )
+            db_session.flush()
+
+
+def test_message_event_timestamps_are_persisted_in_utc(db_session: Session) -> None:
+    attempt = add_message_event_dependencies(db_session)
+    event = ingest_message_event(
+        db_session,
+        send_attempt_id=attempt.business_id,
+        event_type="delivered",
+        source_system="provider-a",
+        source_event_key="evt-utc-normalized",
+        occurred_at=datetime(2026, 10, 22, 9, 0, tzinfo=timezone(timedelta(hours=-4))),
+        recorded_at=datetime(2026, 10, 22, 15, 0, tzinfo=timezone(timedelta(hours=+5))),
+        payload={"message_id": "MSG-UTC", "status": "delivered"},
+    )
+    db_session.flush()
+
+    persisted = db_session.scalar(
+        select(MessageEvent).where(MessageEvent.business_id == event.business_id)
+    )
+    assert persisted is not None
+    assert persisted.occurred_at == datetime(2026, 10, 22, 13, 0, tzinfo=UTC)
+    assert persisted.recorded_at == datetime(2026, 10, 22, 10, 0, tzinfo=UTC)
 
 
 def test_business_id_cannot_be_updated(db_session: Session) -> None:

@@ -76,6 +76,27 @@ def test_equivalent_duplicate_payload_is_idempotent() -> None:
 
 
 @pytest.mark.unit
+def test_late_arriving_valid_event_is_accepted_and_preserved() -> None:
+    session = _FakeSession()
+    earlier = datetime(2026, 10, 21, 11, 0, tzinfo=UTC)
+
+    event = ingest_message_event(
+        session,
+        send_attempt_id="SATT-LATE",
+        event_type="opened",
+        source_system="provider-a",
+        source_event_key="evt-late-arrival",
+        occurred_at=earlier,
+        recorded_at=datetime(2026, 10, 22, 11, 0, tzinfo=UTC),
+        payload={"message_id": "MSG-LATE", "when": "2026-10-21T11:00:00Z"},
+    )
+
+    assert event.occurred_at == earlier
+    assert event.recorded_at == datetime(2026, 10, 22, 11, 0, tzinfo=UTC)
+    assert event.payload == {"message_id": "MSG-LATE", "when": "2026-10-21T11:00:00Z"}
+
+
+@pytest.mark.unit
 def test_conflicting_duplicate_payload_raises_and_preserves_original() -> None:
     session = _FakeSession(
         existing_event=_ExistingEvent(payload={"message_id": "MSG-3", "when": "2026-10-22T11:00:00Z"})

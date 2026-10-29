@@ -63,10 +63,35 @@ Alembic creates the operational tables and the separate PostgreSQL `evaluation` 
 ### Run the API
 
 ```powershell
-python -m uvicorn app.main:app --reload
+python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 Open Swagger UI at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs). Health endpoints are `/health/live` and `/health/ready`.
+
+### Run the frontend demo
+
+From the repository root:
+
+```powershell
+cd frontend
+npm install
+npm run dev -- --host 127.0.0.1 --port 5173
+```
+
+The React app expects the FastAPI app on `http://127.0.0.1:8000` and will render a dashboard using the synthetic summary endpoint when the backend is running.
+
+### Synthetic data generation
+
+The project includes a deterministic generator in `app.generation` that uses seed `20261022` and a fixed scenario timestamp. Use a local PostgreSQL database configured in `.env` before running generation.
+
+```powershell
+python -m app.generation rebuild --profile small --seed 20261022 --reference-time "2026-10-22T00:00:00+00:00" --confirm-destructive
+python -m app.generation hash
+python -m app.generation export --output synthetic-data.jsonl
+python -m app.generation generate --profile scale --seed 20261022 --reference-time "2026-10-22T00:00:00+00:00"
+```
+
+These commands are the intended generation path; they are operationally safe only when the local database has been created and migrated to the current Alembic head.
 
 ### Run tests
 
@@ -78,6 +103,13 @@ python -m pytest -q
 ```
 
 PostgreSQL integration tests require `TEST_DATABASE_URL` to point at a database migrated to the current Alembic head. If the URL is absent, pytest reports those tests as skipped; a skipped integration test is not PostgreSQL verification. Constraint tests run inside transactions that are rolled back.
+
+## Local architecture and known limitations
+
+- The FastAPI backend sits in `app/` and exposes health plus demo endpoints through the main application factory in `app/main.py`.
+- The React frontend in `frontend/` is a local demo client and is intentionally separate from the operational synthetic data workflow.
+- The assignment-grade business workflow is implemented in the SQLAlchemy models, generator pipeline, and recovery services, but the full PostgreSQL-backed generation and validation path remains infrastructure-dependent.
+- In this environment, the local PostgreSQL dependency is not available, so full-scale generation, PostgreSQL integration validation, and reproducibility runs remain blocked until a dedicated database is provided.
 
 ## Phase 3: Synthetic data
 
