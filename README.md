@@ -1,37 +1,4 @@
-# YottaFlex AI — Recruitment Drive
-## Candidate Project Submission Guidelines
 
-**YOUR CHALLENGE WINDOW — 72 HOURS**
-
-The submission window is 72 hours. Artifact timestamps will be used to verify the window.
-
-This README makes no claim that the submission window was met. Record and verify the actual start/deadline and artifact timestamps before submitting.
-
-### 01 — MAKE IT RUN
-**EXECUTABLE**
-
-Submit working, executable code. Include clear steps so another person can install dependencies, configure the project, run it, and verify key behavior.
-
-### 02 — SHOW YOUR WORK
-**PUBLIC REPOSITORY**
-
-Use a public GitHub repository. Make the evolution of your work understandable through the code, meaningful commits, and supporting context.
-
-**Repository URL:** `[Add the actual public repository URL after confirming it is publicly accessible.]`
-
-### 03 — USE LLMs TRANSPARENTLY
-**PROMPT HISTORY REQUIRED**
-
-LLM tools are allowed. Submit your prompt history and explain where AI accelerated your work, where you relied heavily on it, and what you personally reviewed, changed, or validated.
-
-### 04 — MAKE YOUR REASONING VISIBLE
-**EXPLAIN THE WHY**
-
-Help reviewers understand the problem, assumptions, key decisions, trade-offs, testing approach, limitations, and how you know the solution works.
-
-> **BE READY TO WALK US THROUGH YOUR SOLUTION.**
->
-> We value sound judgment, working software, honest AI disclosure, and clear communication.
 
 **YottaFlex.AI — Consent-Aware Abandoned Cart Recovery and Attribution Platform**
 
